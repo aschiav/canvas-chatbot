@@ -28,8 +28,14 @@ if not ASSISTANT_ID:
 
 OPENAI_HEADERS = {
     "Authorization": f"Bearer {OPENAI_API_KEY}",
-    "Content-Type": "application/json"
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "assistants=v2",                      # required for Assistants v2
+    **({"OpenAI-Project": os.environ["OPENAI_PROJECT"]}  # (optional) if your key is project-scoped
+       if os.environ.get("OPENAI_PROJECT") else {}),
+    **({"OpenAI-Organization": os.environ["OPENAI_ORG"]} # (optional) if your org requires it
+       if os.environ.get("OPENAI_ORG") else {}),
 }
+
 
 # ── Security headers so Canvas can iframe your app ────────────────────────────
 @app.after_request
