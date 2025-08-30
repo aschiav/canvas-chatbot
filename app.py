@@ -167,7 +167,7 @@ def index():
   button { padding: 12px 16px; border: 0; border-radius: 10px; cursor: pointer; background: #0ea5e9; color: white; }
   .small { color: #666; font-size: 12px; margin-top: 8px }
 </style>
-<h2>Ask the Course Assistant</h2>
+<h2>Ask questions about the course here:</h2>
 <div id="log" aria-live="polite"></div>
 <form id="f">
   <input id="m" autocomplete="off" placeholder="Type your question…" />
