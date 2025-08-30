@@ -94,12 +94,16 @@ def chat_api():
             return jsonify({"error": r1.text}), 502
 
         # (2) Create a run
+
         r2 = requests.post(
-            f"https://api.openai.com/v1/threads/{thread_id}/runs",
-            headers=OPENAI_HEADERS,
-            json={"assistant_id": ASSISTANT_ID},
-            timeout=30
+        f"https://api.openai.com/v1/threads/{thread_id}/runs",
+        headers=OPENAI_HEADERS,
+        json={
+            "assistant_id": ASSISTANT_ID,
+            "response_format": {"type": "text"}   # ✅ force plain text
+        },timeout=30
         )
+
         if r2.status_code >= 400:
             return jsonify({"error": r2.text}), 502
         run_id = r2.json()["id"]
