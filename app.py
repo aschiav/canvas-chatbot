@@ -23,37 +23,27 @@ ASSISTANT_ID = os.environ.get("ASSISTANT_ID")
 if not OPENAI_API_KEY:
     raise RuntimeError("Missing OPENAI_API_KEY env var")
 if not ASSISTANT_ID:
-    # We don't raise here so the service can start and show a helpful error in UI
     print("⚠️  WARNING: ASSISTANT_ID not set. Set it in Render → Environment.")
 
 OPENAI_HEADERS = {
     "Authorization": f"Bearer {OPENAI_API_KEY}",
     "Content-Type": "application/json",
-    "OpenAI-Beta": "assistants=v2",                      # required for Assistants v2
-    **({"OpenAI-Project": os.environ["OPENAI_PROJECT"]}  # (optional) if your key is project-scoped
-       if os.environ.get("OPENAI_PROJECT") else {}),
-    **({"OpenAI-Organization": os.environ["OPENAI_ORG"]} # (optional) if your org requires it
-       if os.environ.get("OPENAI_ORG") else {}),
+    "OpenAI-Beta": "assistants=v2",
+    **({"OpenAI-Project": os.environ["OPENAI_PROJECT"]} if os.environ.get("OPENAI_PROJECT") else {}),
+    **({"OpenAI-Organization": os.environ["OPENAI_ORG"]} if os.environ.get("OPENAI_ORG") else {}),
 }
-
 
 # ── Security headers so Canvas can iframe your app ────────────────────────────
 @app.after_request
 def add_headers(resp):
-    # Allow iframing by Canvas
     resp.headers["Content-Security-Policy"] = (
         "frame-ancestors 'self' https://*.instructure.com https://*.instructuremedia.com;"
     )
-    # If any proxy sets a blocking X-Frame-Options, override it
     resp.headers["X-Frame-Options"] = "ALLOWALL"
     return resp
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def ensure_thread():
-    """
-    Create or reuse a per-user thread stored in the Flask session.
-    Each browser/user gets their own conversation thread.
-    """
     if "thread_id" not in session:
         r = requests.post(
             "https://api.openai.com/v1/threads",
@@ -67,7 +57,6 @@ def ensure_thread():
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route("/health")
 def health():
-    # Simple health endpoint for Render
     return {"ok": True}, 200
 
 @app.route("/api/chat", methods=["POST"])
@@ -83,7 +72,6 @@ def chat_api():
     try:
         thread_id = ensure_thread()
 
-        # (1) Add user message to thread
         r1 = requests.post(
             f"https://api.openai.com/v1/threads/{thread_id}/messages",
             headers=OPENAI_HEADERS,
@@ -93,23 +81,19 @@ def chat_api():
         if r1.status_code >= 400:
             return jsonify({"error": r1.text}), 502
 
-        # (2) Create a run
-
         r2 = requests.post(
-        f"https://api.openai.com/v1/threads/{thread_id}/runs",
-        headers=OPENAI_HEADERS,
-        json={
-            "assistant_id": ASSISTANT_ID,
-            "response_format": {"type": "text"}   # ✅ force plain text
-        },timeout=30
+            f"https://api.openai.com/v1/threads/{thread_id}/runs",
+            headers=OPENAI_HEADERS,
+            json={
+                "assistant_id": ASSISTANT_ID,
+                "response_format": {"type": "text"}
+            },
+            timeout=30
         )
-
         if r2.status_code >= 400:
             return jsonify({"error": r2.text}), 502
         run_id = r2.json()["id"]
 
-        # (3) Poll until the run completes
-        #    (You can switch to server-sent events for streaming later.)
         while True:
             rr = requests.get(
                 f"https://api.openai.com/v1/threads/{thread_id}/runs/{run_id}",
@@ -125,7 +109,6 @@ def chat_api():
         if status != "completed":
             return jsonify({"error": f"run status: {status}"}), 502
 
-        # (4) Fetch the latest assistant message and extract text
         msgs = requests.get(
             f"https://api.openai.com/v1/threads/{thread_id}/messages",
             headers=OPENAI_HEADERS,
@@ -150,7 +133,6 @@ def chat_api():
 
 @app.route("/")
 def index():
-    # Minimal UI for Canvas iframe or direct use
     return """
 <!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -161,7 +143,9 @@ def index():
   h2 { margin: 0 0 12px 0; }
   #log { border: 1px solid #e2e2e2; padding: var(--pad); height: 460px; overflow: auto; border-radius: 10px; background: #fafafa; }
   .u { color: #333; margin: 4px 0; }
-  .b { color: #0b3d2e; margin: 4px 0; white-space: pre-wrap; }
+  .b { color: #0b3d2e; margin: 4px 0; white-space: pre-wrap; display: flex; align-items: center; gap: 6px; }
+  .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #0ea5e9; border-radius: 50%; width: 12px; height: 12px; animation: spin 1s linear infinite; }
+  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   form { display: flex; gap: 8px; margin-top: 12px; }
   input { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 10px; }
   button { padding: 12px 16px; border: 0; border-radius: 10px; cursor: pointer; background: #0ea5e9; color: white; }
@@ -179,12 +163,22 @@ def index():
   const f = document.getElementById('f');
   const m = document.getElementById('m');
 
-  function addLine(cls, prefix, text){
+  function addLine(cls, prefix, text, withSpinner=false){
     const d = document.createElement('div');
     d.className = cls;
-    d.textContent = prefix + text;
+    if(withSpinner){
+      const spinner = document.createElement('div');
+      spinner.className = 'spinner';
+      d.appendChild(spinner);
+      const span = document.createElement('span');
+      span.textContent = prefix + text;
+      d.appendChild(span);
+    } else {
+      d.textContent = prefix + text;
+    }
     log.appendChild(d);
     log.scrollTop = log.scrollHeight;
+    return d;
   }
 
   f.addEventListener('submit', async (e) => {
@@ -193,6 +187,10 @@ def index():
     if (!text) return;
     addLine('u', 'You: ', text);
     m.value = '';
+
+    // Add temporary "checking syllabus..." with spinner
+    const placeholder = addLine('b', 'Bot: ', 'checking syllabus...', true);
+
     try {
       const r = await fetch('/api/chat', {
         method: 'POST',
@@ -200,9 +198,9 @@ def index():
         body: JSON.stringify({ message: text })
       });
       const data = await r.json();
-      addLine('b', 'Bot: ', data.text || data.error || '[no response]');
+      placeholder.textContent = 'Bot: ' + (data.text || data.error || '[no response]');
     } catch (err) {
-      addLine('b', 'Bot: ', 'Network error: ' + err);
+      placeholder.textContent = 'Bot: Network error: ' + err;
     }
   });
 </script>
@@ -210,5 +208,4 @@ def index():
 
 # ── Entrypoint for local dev ───────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Local: python app.py
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
